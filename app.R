@@ -21,7 +21,7 @@ koneksi_db <- function() {
 
 # UI
 ui <- dashboardPage(
-  dashboardHeader(title = "Dashboard Gabungan Data Penjualan"),
+  dashboardHeader(title = "Dashboard Gabungan Data Penjualan online"),
   dashboardSidebar(
     sidebarMenu(
       menuItem("Dashboard", tabName = "dashboard", icon = icon("tachometer-alt")),
@@ -173,7 +173,7 @@ server <- function(input, output, session) {
     on.exit(dbDisconnect(con), add = TRUE)
     dbGetQuery(con, "SELECT DISTINCT kategori, segmentasi_pelanggan, segmentasi_produk, 
                               MIN(harga) as min_harga, MAX(harga) as max_harga 
-                     FROM gabungan_3_data")
+                     FROM gabungan_3_data_produk_customers_dan_reviews")
   })
   
   # Update filter choices
@@ -205,7 +205,7 @@ server <- function(input, output, session) {
     on.exit(dbDisconnect(con), add = TRUE)
     
     # Base query
-    query <- "SELECT * FROM gabungan_3_data WHERE 1=1"
+    query <- "SELECT * FROM gabungan_3_data_produk_customers_dan_reviews  WHERE 1=1"
     
     # Add filters
     if (!is.null(input$date_range)) {
