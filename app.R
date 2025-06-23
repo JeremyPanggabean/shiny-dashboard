@@ -7,366 +7,226 @@ library(ggplot2)
 library(dplyr)
 library(plotly)
 
-# Database connection function
+# Fungsi koneksi database
 koneksi_db <- function() {
-  tryCatch({
-    dbConnect(
-      Postgres(),
-      dbname = Sys.getenv("DB_NAME", "railway"),
-      host = Sys.getenv("DB_HOST", "turntable.proxy.rlwy.net"),  
-      port = as.integer(Sys.getenv("DB_PORT", 30325)),
-      user = Sys.getenv("DB_USER", "postgres"),
-      password = Sys.getenv("DB_PASSWORD", "zFsimXXGRVzLkcMiShuvxOSXLSULnfCG")
-    )
-  }, error = function(e) {
-    message("Database connection failed: ", e$message)
-    return(NULL)
-  })
+  dbConnect(
+    Postgres(),
+    dbname = Sys.getenv("DB_NAME", "railway"),
+    host = Sys.getenv("DB_HOST", "turntable.proxy.rlwy.net"),  
+    port = as.integer(Sys.getenv("DB_PORT", 30325)),
+    user = Sys.getenv("DB_USER", "postgres"),
+    password = Sys.getenv("DB_PASSWORD", "zFsimXXGRVzLkcMiShuvxOSXLSULnfCG")
+  )
 }
 
-# Simplified UI
+# UI
 ui <- dashboardPage(
-  dashboardHeader(title = "Dashboard Penjualan Online"),
+  dashboardHeader(title = "Dashboard Gabungan Data Penjualan"),
   dashboardSidebar(
     sidebarMenu(
-      menuItem("Dashboard", tabName = "dashboard", icon = icon("tachometer-alt")),
-      menuItem("Data Table", tabName = "tabel", icon = icon("table")),
-      menuItem("Analytics", tabName = "analytics", icon = icon("chart-line"))
-    ),
-    
-    # Simple filters
-    hr(),
-    h4("Filters", style = "color: white; margin-left: 15px;"),
-    
-    selectInput("kategori_filter", 
-                "Product Category:",
-                choices = NULL,
-                multiple = TRUE),
-    
-    sliderInput("limit_data", 
-                "Data Limit:",
-                min = 100, max = 10000, 
-                value = 1000,
-                step = 100),
-    
-    actionButton("refresh_data", "Refresh Data", 
-                 class = "btn-primary", 
-                 style = "margin-left: 15px; margin-top: 10px;")
+      menuItem("Tabel", tabName = "tabel", icon = icon("table")),
+      menuItem("Visualisasi Penjualan", tabName = "visual_penjualan", icon = icon("chart-line")),
+      menuItem("Visualisasi Produk", tabName = "visual_produk", icon = icon("chart-bar")),
+      menuItem("Visualisasi Ulasan", tabName = "visual_ulasan", icon = icon("star"))
+    )
   ),
-  
   dashboardBody(
-    tags$head(
-      tags$style(HTML("
-        .content-wrapper, .right-side {
-          background-color: #f4f4f4;
-        }
-      "))
-    ),
-    
     tabItems(
-      # Dashboard tab
-      tabItem(
-        tabName = "dashboard",
-        fluidRow(
-          valueBoxOutput("total_sales", width = 4),
-          valueBoxOutput("total_orders", width = 4),
-          valueBoxOutput("avg_rating", width = 4)
-        ),
-        fluidRow(
-          box(width = 6, title = "Sales by Category", status = "primary", 
-              plotlyOutput("sales_by_category", height = "300px")),
-          box(width = 6, title = "Rating Distribution", status = "info", 
-              plotlyOutput("rating_dist", height = "300px"))
-        ),
-        fluidRow(
-          box(width = 12, title = "Recent Orders", status = "success",
-              DT::dataTableOutput("recent_orders"))
-        )
-      ),
-      
-      # Data table tab
+      # Tab Tabel
       tabItem(
         tabName = "tabel",
         fluidRow(
-          box(width = 12, title = "Sales Data", status = "primary",
-              DT::dataTableOutput("main_table"))
+          box(width = 12, title = "Data Gabungan Penjualan", DTOutput("data_gabungan"))
         )
       ),
       
-      # Analytics tab
+      # Tab Visualisasi Penjualan
       tabItem(
-        tabName = "analytics",
+        tabName = "visual_penjualan",
         fluidRow(
-          box(width = 6, title = "Price vs Profit", status = "warning",
-              plotlyOutput("price_profit_scatter", height = "350px")),
-          box(width = 6, title = "Customer Segmentation", status = "danger",
-              plotlyOutput("customer_segment", height = "350px"))
+          box(width = 6, title = "Total Penjualan per Kategori", plotOutput("penjualan_kategori")),
+          box(width = 6, title = "Distribusi Total Harga", plotOutput("histogram_total_harga"))
         ),
         fluidRow(
-          box(width = 12, title = "Product Performance", status = "info",
-              plotlyOutput("product_performance", height = "400px"))
+          box(width = 6, title = "Penjualan per Segmentasi Pelanggan", plotOutput("penjualan_segmentasi")),
+          box(width = 6, title = "Trend Penjualan Bulanan", plotOutput("trend_bulanan"))
+        )
+      ),
+      
+      # Tab Visualisasi Produk
+      tabItem(
+        tabName = "visual_produk",
+        fluidRow(
+          box(width = 6, title = "Harga Rata-rata per Kategori", plotOutput("avg_harga_kategori")),
+          box(width = 6, title = "Segmentasi Produk", plotOutput("segmentasi_produk"))
+        ),
+        fluidRow(
+          box(width = 6, title = "Top 10 Produk Termahal", plotOutput("top_produk")),
+          box(width = 6, title = "Estimasi Keuntungan vs Harga", plotOutput("scatter_keuntungan"))
+        )
+      ),
+      
+      # Tab Visualisasi Ulasan
+      tabItem(
+        tabName = "visual_ulasan",
+        fluidRow(
+          box(width = 6, title = "Distribusi Bintang Ulasan", plotOutput("distribusi_bintang")),
+          box(width = 6, title = "Kategori Ulasan", plotOutput("kategori_ulasan"))
+        ),
+        fluidRow(
+          box(width = 12, title = "Rata-rata Bintang per Kategori Produk", plotOutput("bintang_per_kategori"))
         )
       )
     )
   )
 )
 
-# Simplified Server
+# Server
 server <- function(input, output, session) {
   
-  # Reactive data loading with error handling
-  base_data <- reactive({
+  # Data reactive
+  data_gabungan <- reactive({
     con <- koneksi_db()
-    if (is.null(con)) {
-      # Return sample data if DB connection fails
-      return(data.frame(
-        kategori = c("Electronics", "Clothing", "Books"),
-        total_harga = c(1000, 500, 200),
-        bintang_ulasan = c(4, 5, 3),
-        nama_produk = c("Sample Product 1", "Sample Product 2", "Sample Product 3"),
-        harga = c(100, 50, 20),
-        estimasi_keuntungan = c(20, 10, 5),
-        segmentasi_pelanggan = c("Premium", "Regular", "Basic"),
-        id_pesanan = c("001", "002", "003"),
-        tanggal_pesanan = as.Date(c("2024-01-01", "2024-01-02", "2024-01-03"))
-      ))
-    }
-    
     on.exit(dbDisconnect(con), add = TRUE)
-    
-    query <- paste0("SELECT * FROM gabungan_3_data_produk_customers_dan_reviews LIMIT ", input$limit_data)
-    
-    tryCatch({
-      data <- dbGetQuery(con, query)
-      if (nrow(data) > 0 && "tanggal_pesanan" %in% names(data)) {
-        data$tanggal_pesanan <- as.Date(data$tanggal_pesanan)
-      }
-      return(data)
-    }, error = function(e) {
-      message("Query failed: ", e$message)
-      return(data.frame())
-    })
+    dbGetQuery(con, "SELECT * FROM gabungan_3_data_produk_customers_dan_reviews")
   })
   
-  # Update category filter choices
-  observe({
-    data <- base_data()
-    if (nrow(data) > 0 && "kategori" %in% names(data)) {
-      choices <- sort(unique(data$kategori))
-      updateSelectInput(session, "kategori_filter",
-                        choices = choices,
-                        selected = choices)
-    }
+  # Output tabel
+  output$data_gabungan <- renderDT({
+    datatable(data_gabungan(), options = list(scrollX = TRUE))
   })
   
-  # Filtered data
-  filtered_data <- reactive({
-    data <- base_data()
-    if (nrow(data) == 0) return(data)
-    
-    if (!is.null(input$kategori_filter) && length(input$kategori_filter) > 0) {
-      data <- data[data$kategori %in% input$kategori_filter, ]
-    }
-    
-    return(data)
-  })
-  
-  # Refresh data when button clicked
-  observeEvent(input$refresh_data, {
-    base_data()
-  })
-  
-  # Value boxes
-  output$total_sales <- renderValueBox({
-    data <- filtered_data()
-    total <- if (nrow(data) > 0 && "total_harga" %in% names(data)) {
-      sum(data$total_harga, na.rm = TRUE)
-    } else {
-      0
-    }
-    
-    valueBox(
-      value = paste0("$", format(total, big.mark = ",")),
-      subtitle = "Total Sales",
-      icon = icon("dollar-sign"),
-      color = "green"
-    )
-  })
-  
-  output$total_orders <- renderValueBox({
-    total <- nrow(filtered_data())
-    valueBox(
-      value = format(total, big.mark = ","),
-      subtitle = "Total Orders",
-      icon = icon("shopping-cart"),
-      color = "blue"
-    )
-  })
-  
-  output$avg_rating <- renderValueBox({
-    data <- filtered_data()
-    avg <- if (nrow(data) > 0 && "bintang_ulasan" %in% names(data)) {
-      round(mean(data$bintang_ulasan, na.rm = TRUE), 2)
-    } else {
-      0
-    }
-    
-    valueBox(
-      value = paste0(avg, "/5"),
-      subtitle = "Average Rating",
-      icon = icon("star"),
-      color = "yellow"
-    )
-  })
-  
-  # Charts
-  output$sales_by_category <- renderPlotly({
-    data <- filtered_data()
-    
-    if (nrow(data) == 0 || !"kategori" %in% names(data)) {
-      p <- ggplot() + 
-        geom_text(aes(x = 0, y = 0, label = "No data available")) +
-        theme_void()
-      return(ggplotly(p))
-    }
-    
-    chart_data <- data %>%
+  # Visualisasi Penjualan
+  output$penjualan_kategori <- renderPlot({
+    data_gabungan() %>%
       group_by(kategori) %>%
-      summarise(total = sum(total_harga, na.rm = TRUE), .groups = 'drop') %>%
-      top_n(10, total)
-    
-    p <- ggplot(chart_data, aes(x = reorder(kategori, total), y = total, fill = kategori)) +
+      summarise(total_penjualan = sum(total_harga)) %>%
+      ggplot(aes(x = reorder(kategori, -total_penjualan), y = total_penjualan, fill = kategori)) +
+      geom_bar(stat = "identity") +
+      theme_minimal() +
+      labs(x = "Kategori", y = "Total Penjualan") +
+      theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1)) +
+      scale_y_continuous(labels = scales::comma)
+  })
+  
+  output$histogram_total_harga <- renderPlot({
+    ggplot(data_gabungan(), aes(x = total_harga)) +
+      geom_histogram(bins = 20, fill = "#2c7fb8", color = "white") +
+      theme_minimal() +
+      labs(x = "Total Harga", y = "Jumlah Transaksi") +
+      scale_x_continuous(labels = scales::comma)
+  })
+  
+  output$penjualan_segmentasi <- renderPlot({
+    data_gabungan() %>%
+      group_by(segmentasi_pelanggan) %>%
+      summarise(total_penjualan = sum(total_harga)) %>%
+      ggplot(aes(x = reorder(segmentasi_pelanggan, -total_penjualan), y = total_penjualan, fill = segmentasi_pelanggan)) +
+      geom_bar(stat = "identity") +
+      theme_minimal() +
+      labs(x = "Segmentasi Pelanggan", y = "Total Penjualan") +
+      theme(legend.position = "none") +
+      scale_y_continuous(labels = scales::comma)
+  })
+  
+  output$trend_bulanan <- renderPlot({
+    data_gabungan() %>%
+      mutate(bulan = format(as.Date(tanggal_pesanan), "%Y-%m")) %>%
+      group_by(bulan) %>%
+      summarise(total_penjualan = sum(total_harga)) %>%
+      ggplot(aes(x = bulan, y = total_penjualan, group = 1)) +
+      geom_line(color = "#2c7fb8", size = 1) +
+      geom_point(color = "#2c7fb8", size = 2) +
+      theme_minimal() +
+      labs(x = "Bulan", y = "Total Penjualan") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      scale_y_continuous(labels = scales::comma)
+  })
+  
+  # Visualisasi Produk
+  output$avg_harga_kategori <- renderPlot({
+    data_gabungan() %>%
+      group_by(kategori) %>%
+      summarise(rata_rata = mean(harga)) %>%
+      ggplot(aes(x = reorder(kategori, -rata_rata), y = rata_rata, fill = kategori)) +
+      geom_col() +
+      theme_minimal() +
+      labs(x = "Kategori", y = "Harga Rata-rata") +
+      theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1)) +
+      scale_y_continuous(labels = scales::comma)
+  })
+  
+  output$segmentasi_produk <- renderPlot({
+    data_gabungan() %>%
+      count(segmentasi_produk) %>%
+      ggplot(aes(x = reorder(segmentasi_produk, -n), y = n, fill = segmentasi_produk)) +
+      geom_bar(stat = "identity") +
+      theme_minimal() +
+      labs(x = "Segmentasi Produk", y = "Jumlah Produk") +
+      theme(legend.position = "none")
+  })
+  
+  output$top_produk <- renderPlot({
+    data_gabungan() %>%
+      select(nama_produk, harga) %>%
+      distinct() %>%
+      arrange(desc(harga)) %>%
+      head(10) %>%
+      ggplot(aes(x = reorder(nama_produk, harga), y = harga, fill = harga)) +
       geom_col() +
       coord_flip() +
       theme_minimal() +
-      theme(legend.position = "none") +
-      labs(x = "Category", y = "Total Sales")
-    
-    ggplotly(p)
+      labs(x = "Produk", y = "Harga") +
+      scale_fill_gradient(low = "#add8e6", high = "#2c7fb8") +
+      scale_y_continuous(labels = scales::comma)
   })
   
-  output$rating_dist <- renderPlotly({
-    data <- filtered_data()
-    
-    if (nrow(data) == 0 || !"bintang_ulasan" %in% names(data)) {
-      p <- ggplot() + 
-        geom_text(aes(x = 0, y = 0, label = "No data available")) +
-        theme_void()
-      return(ggplotly(p))
-    }
-    
-    chart_data <- data %>%
+  output$scatter_keuntungan <- renderPlot({
+    data_gabungan() %>%
+      ggplot(aes(x = harga, y = estimasi_keuntungan, color = kategori)) +
+      geom_point(alpha = 0.7) +
+      theme_minimal() +
+      labs(x = "Harga", y = "Estimasi Keuntungan", color = "Kategori") +
+      scale_x_continuous(labels = scales::comma) +
+      scale_y_continuous(labels = scales::comma)
+  })
+  
+  # Visualisasi Ulasan
+  output$distribusi_bintang <- renderPlot({
+    data_gabungan() %>%
       count(bintang_ulasan) %>%
-      filter(!is.na(bintang_ulasan))
-    
-    p <- ggplot(chart_data, aes(x = factor(bintang_ulasan), y = n, fill = factor(bintang_ulasan))) +
+      ggplot(aes(x = factor(bintang_ulasan), y = n, fill = factor(bintang_ulasan))) +
+      geom_bar(stat = "identity") +
+      theme_minimal() +
+      labs(x = "Bintang Ulasan", y = "Jumlah Ulasan") +
+      theme(legend.position = "none") +
+      scale_fill_brewer(palette = "YlOrRd")
+  })
+  
+  output$kategori_ulasan <- renderPlot({
+    data_gabungan() %>%
+      count(kategori_ulasan) %>%
+      ggplot(aes(x = reorder(kategori_ulasan, -n), y = n, fill = kategori_ulasan)) +
+      geom_bar(stat = "identity") +
+      theme_minimal() +
+      labs(x = "Kategori Ulasan", y = "Jumlah") +
+      theme(legend.position = "none") +
+      scale_fill_manual(values = c("Very Poor" = "#d62728", "Poor" = "#ff7f0e", 
+                                   "Good" = "#2ca02c", "Very Good" = "#1f77b4"))
+  })
+  
+  output$bintang_per_kategori <- renderPlot({
+    data_gabungan() %>%
+      group_by(kategori) %>%
+      summarise(rata_bintang = mean(bintang_ulasan)) %>%
+      ggplot(aes(x = reorder(kategori, -rata_bintang), y = rata_bintang, fill = kategori)) +
       geom_col() +
       theme_minimal() +
-      theme(legend.position = "none") +
-      labs(x = "Rating", y = "Count")
-    
-    ggplotly(p)
-  })
-  
-  output$price_profit_scatter <- renderPlotly({
-    data <- filtered_data()
-    
-    if (nrow(data) == 0 || !all(c("harga", "estimasi_keuntungan") %in% names(data))) {
-      p <- ggplot() + 
-        geom_text(aes(x = 0, y = 0, label = "No data available")) +
-        theme_void()
-      return(ggplotly(p))
-    }
-    
-    p <- ggplot(data, aes(x = harga, y = estimasi_keuntungan)) +
-      geom_point(alpha = 0.6, color = "#2c7fb8") +
-      theme_minimal() +
-      labs(x = "Price", y = "Estimated Profit")
-    
-    ggplotly(p)
-  })
-  
-  output$customer_segment <- renderPlotly({
-    data <- filtered_data()
-    
-    if (nrow(data) == 0 || !"segmentasi_pelanggan" %in% names(data)) {
-      p <- ggplot() + 
-        geom_text(aes(x = 0, y = 0, label = "No data available")) +
-        theme_void()
-      return(ggplotly(p))
-    }
-    
-    chart_data <- data %>%
-      count(segmentasi_pelanggan) %>%
-      filter(!is.na(segmentasi_pelanggan))
-    
-    plot_ly(chart_data, labels = ~segmentasi_pelanggan, values = ~n, type = 'pie') %>%
-      layout(showlegend = TRUE)
-  })
-  
-  output$product_performance <- renderPlotly({
-    data <- filtered_data()
-    
-    if (nrow(data) == 0 || !all(c("nama_produk", "total_harga") %in% names(data))) {
-      p <- ggplot() + 
-        geom_text(aes(x = 0, y = 0, label = "No data available")) +
-        theme_void()
-      return(ggplotly(p))
-    }
-    
-    chart_data <- data %>%
-      group_by(nama_produk) %>%
-      summarise(total_sales = sum(total_harga, na.rm = TRUE), .groups = 'drop') %>%
-      top_n(15, total_sales)
-    
-    p <- ggplot(chart_data, aes(x = reorder(nama_produk, total_sales), y = total_sales)) +
-      geom_col(fill = "#2c7fb8") +
-      coord_flip() +
-      theme_minimal() +
-      labs(x = "Product", y = "Total Sales")
-    
-    ggplotly(p)
-  })
-  
-  # Data tables
-  output$main_table <- DT::renderDataTable({
-    data <- filtered_data()
-    if (nrow(data) == 0) {
-      return(DT::datatable(data.frame(Message = "No data available")))
-    }
-    
-    DT::datatable(data, 
-                  options = list(
-                    scrollX = TRUE, 
-                    pageLength = 25,
-                    responsive = TRUE
-                  ),
-                  class = 'cell-border stripe')
-  })
-  
-  output$recent_orders <- DT::renderDataTable({
-    data <- filtered_data()
-    if (nrow(data) == 0) {
-      return(DT::datatable(data.frame(Message = "No data available")))
-    }
-    
-    # Select relevant columns and limit rows
-    display_cols <- intersect(c("id_pesanan", "tanggal_pesanan", "nama_produk", 
-                               "kategori", "total_harga", "bintang_ulasan"), names(data))
-    
-    recent_data <- data[display_cols] %>%
-      head(50)
-    
-    DT::datatable(recent_data, 
-                  options = list(
-                    pageLength = 10, 
-                    dom = 't',
-                    responsive = TRUE
-                  ), 
-                  rownames = FALSE,
-                  class = 'cell-border stripe')
+      labs(x = "Kategori Produk", y = "Rata-rata Bintang") +
+      theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1)) +
+      ylim(0, 5)
   })
 }
 
-# Run the application
+# Menjalankan aplikasi
 shinyApp(ui = ui, server = server)
